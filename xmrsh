@@ -19,6 +19,8 @@ IS_MAC=0
 IS_LINUX=0
 IS_ARM=0
 IS_X86=0
+PHYSICAL_CORES=0
+LOGICAL_CORES=0
 
 # Detect system architecture and OS
 detect_system() {
@@ -477,7 +479,7 @@ uninstall_xmrsh() {
 
 # Show help
 show_help() {
-    echo -e "${PURPLE}======== XMRig Helper (xmrsh) ========${NC}"
+    echo -e "${PURPLE}============== XMRig Helper (xmrsh) ==============${NC}"
     echo -e "${BLUE}Usage:${NC}"
     echo -e "  xmrsh [command]"
     echo ""
@@ -487,6 +489,7 @@ show_help() {
     echo -e "  ${GREEN}start, st${NC}        Start XMRig in the background"
     echo -e "  ${GREEN}status, stat${NC}     Check XMRig status"
     echo -e "  ${GREEN}stop, sp${NC}         Stop XMRig"
+    echo -e "  ${GREEN}core, co${NC}         Set or show CPU core usage (1-100%)"
     echo -e "  ${GREEN}setup, s${NC}         Install xmrsh to system path"
     echo -e "  ${GREEN}uninstall, u${NC}     Remove all xmrsh components"
     echo -e "  ${GREEN}system, sys${NC}      Show system information"
@@ -496,6 +499,7 @@ show_help() {
     echo -e "  ${CYAN}xmrsh i${NC}          Install XMRig and its dependencies"
     echo -e "  ${CYAN}xmrsh st${NC}         Start mining with XMRig"
     echo -e "  ${CYAN}xmrsh sp${NC}         Stop mining"
+    echo -e "  ${CYAN}xmrsh co 50${NC}      Set XMRig to use 50% of CPU cores"
     echo ""
     echo -e "${YELLOW}For more information, visit: https://xmrig.com/docs${NC}"
 }
@@ -548,7 +552,8 @@ show_system_info() {
 check_status() {
     if screen -list | grep -q "xmrig"; then
         success "XMRig is running in a screen session."
-        info "To view the mining console, run: screen -r xmrig"
+        info "Attaching to screen session..."
+        screen -R -d xmrig
     elif [ $IS_MAC -eq 1 ] && launchctl list | grep -q "com.xmrig.miner"; then
         success "XMRig is running via launchctl."
         info "Check logs at $HOME/.xmrig.log"
@@ -577,6 +582,162 @@ stop_xmrig() {
     else
         warning "No running XMRig instance found."
     fi
+}
+
+# Detect CPU cores and threads
+detect_cpu_cores() {
+    info "Detecting CPU cores..."
+    
+    # Get logical (total) cores
+    if [ $IS_MAC -eq 1 ]; then
+        LOGICAL_CORES=$(sysctl -n hw.ncpu)
+    elif [ $IS_LINUX -eq 1 ]; then
+        LOGICAL_CORES=$(nproc)
+    else
+        LOGICAL_CORES=1
+        warning "Could not detect logical cores, assuming 1"
+    fi
+    
+    # Get physical cores
+    if [ $IS_MAC -eq 1 ]; then
+        PHYSICAL_CORES=$(sysctl -n hw.physicalcpu)
+    elif [ $IS_LINUX -eq 1 ]; then
+        # Try different methods to get physical core count
+        if [ -f /proc/cpuinfo ]; then
+            # Count unique combination of physical id and core id
+            PHYSICAL_CORES=$(grep -E "^physical id|^core id" /proc/cpuinfo | tr -d "\n" | sed s/physical/\\nphysical/g | grep -v "^$" | sort -u | wc -l)
+            if [ "$PHYSICAL_CORES" -eq 0 ]; then
+                # Alternative method: count unique core IDs
+                PHYSICAL_CORES=$(grep -E "^core id" /proc/cpuinfo | sort -u | wc -l)
+                if [ "$PHYSICAL_CORES" -eq 0 ]; then
+                    # Last resort: use lscpu
+                    if command -v lscpu &> /dev/null; then
+                        PHYSICAL_CORES=$(lscpu | grep "^Core(s) per socket" | awk '{print $4}')
+                        # Multiply by number of sockets if available
+                        SOCKETS=$(lscpu | grep "^Socket(s)" | awk '{print $2}')
+                        if [ -n "$SOCKETS" ]; then
+                            PHYSICAL_CORES=$((PHYSICAL_CORES * SOCKETS))
+                        fi
+                    else
+                        # If all else fails, assume logical cores = physical cores
+                        PHYSICAL_CORES=$LOGICAL_CORES
+                        warning "Could not detect physical cores, assuming same as logical cores"
+                    fi
+                fi
+            fi
+        else
+            # If /proc/cpuinfo doesn't exist, try lscpu
+            if command -v lscpu &> /dev/null; then
+                PHYSICAL_CORES=$(lscpu | grep "^Core(s) per socket" | awk '{print $4}')
+                # Multiply by number of sockets if available
+                SOCKETS=$(lscpu | grep "^Socket(s)" | awk '{print $2}')
+                if [ -n "$SOCKETS" ]; then
+                    PHYSICAL_CORES=$((PHYSICAL_CORES * SOCKETS))
+                fi
+            else
+                # If all else fails, assume logical cores = physical cores
+                PHYSICAL_CORES=$LOGICAL_CORES
+                warning "Could not detect physical cores, assuming same as logical cores"
+            fi
+        fi
+    else
+        PHYSICAL_CORES=1
+        warning "Could not detect physical cores, assuming 1"
+    fi
+    
+    success "Detected $PHYSICAL_CORES physical cores, $LOGICAL_CORES logical cores"
+}
+
+# Update config.json with specified number of cores
+update_core_config() {
+    local cores=$1
+    local config_file="$HOME/.config.json"
+    
+    # Make sure we have cores info
+    if [ "$PHYSICAL_CORES" -eq 0 ]; then
+        detect_cpu_cores
+    fi
+    
+    # Validate input
+    if ! [[ "$cores" =~ ^[0-9]+$ ]]; then
+        error "Invalid number of cores specified: $cores"
+    fi
+    
+    # If cores is specified as percentage
+    if [ "$cores" -gt 100 ]; then
+        cores=100
+        warning "Core value capped at 100%"
+    fi
+    
+    # Check if config file exists
+    if [ ! -f "$config_file" ]; then
+        warning "Config file not found. Downloading..."
+        update_config
+    fi
+    
+    info "Updating config to use $cores% of available cores..."
+    
+    # Create a temporary file
+    local temp_file=$(mktemp)
+    
+    # Replace max-threads-hint value
+    if [ $IS_MAC -eq 1 ]; then
+        # macOS sed syntax
+        sed -E "s/\"max-threads-hint\":[[:space:]]*[0-9]+,/\"max-threads-hint\": $cores,/g" "$config_file" > "$temp_file"
+    else
+        # Linux sed syntax
+        sed -E "s/\"max-threads-hint\":[[:space:]]*[0-9]+,/\"max-threads-hint\": $cores,/g" "$config_file" > "$temp_file"
+    fi
+    
+    # Check if the replacement was successful
+    if grep -q "\"max-threads-hint\": $cores," "$temp_file"; then
+        mv "$temp_file" "$config_file"
+        success "Config updated to use $cores% of CPU threads"
+        
+        # If running through a service, restart
+        if [ $IS_MAC -eq 1 ] && launchctl list | grep -q "com.xmrig.miner"; then
+            info "Restarting XMRig service..."
+            launchctl unload "$HOME/Library/LaunchAgents/com.xmrig.miner.plist" 2>/dev/null
+            launchctl load "$HOME/Library/LaunchAgents/com.xmrig.miner.plist"
+        elif [ $IS_LINUX -eq 1 ] && command -v systemctl &> /dev/null && systemctl is-active --quiet xmrig; then
+            info "Restarting XMRig service..."
+            sudo systemctl restart xmrig
+        fi
+    else
+        rm "$temp_file"
+        error "Failed to update config file"
+    fi
+}
+
+# Show CPU core usage information
+show_core_usage() {
+    # Make sure we have cores info
+    if [ "$PHYSICAL_CORES" -eq 0 ]; then
+        detect_cpu_cores
+    fi
+    
+    echo -e "${PURPLE}======== CPU Core Information ========${NC}"
+    echo -e "${BLUE}Physical cores:${NC} $PHYSICAL_CORES"
+    echo -e "${BLUE}Logical cores:${NC} $LOGICAL_CORES"
+    
+    # Check current config setting
+    local config_file="$HOME/.config.json"
+    if [ -f "$config_file" ]; then
+        local current_threads=$(grep -Eo '"max-threads-hint":[[:space:]]*[0-9]+' "$config_file" | grep -Eo '[0-9]+')
+        if [ -n "$current_threads" ]; then
+            echo -e "${BLUE}Current setting:${NC} $current_threads% of available cores"
+            
+            # Calculate actual threads that will be used
+            local actual_threads=$(( LOGICAL_CORES * current_threads / 100 ))
+            echo -e "${BLUE}Threads used:${NC} ~$actual_threads threads"
+        else
+            echo -e "${BLUE}Current setting:${NC} Not found in config"
+        fi
+    else
+        echo -e "${BLUE}Config file:${NC} Not found"
+    fi
+    
+    echo -e "${YELLOW}Use 'xmrsh core <percentage>' to set CPU usage (1-100)${NC}"
 }
 
 # Main function
@@ -610,6 +771,18 @@ main() {
             ;;
         stop|sp)
             stop_xmrig
+            ;;
+        core|co)
+            # Detect cores first
+            detect_cpu_cores
+            
+            if [ -z "$2" ]; then
+                # If no argument, show current usage
+                show_core_usage
+            else
+                # Update config with specified core usage
+                update_core_config "$2"
+            fi
             ;;
         setup|s)
             install_xmrsh
