@@ -171,7 +171,7 @@ install_xmrig() {
 # Download and update config.json
 update_config() {
     info "Downloading latest config.json..."
-    CONFIG_URL="https://gist.aooo.nl/u/053d355b994f4de4a4fea28c932e3792/raw/HEAD/config.json"
+    CONFIG_URL="https://raw.githubusercontent.com/sarkrui/xmrsh/refs/heads/main/config.json"
     
     # Default config path
     CONFIG_PATH="$HOME/.config.json"
