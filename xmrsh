@@ -375,7 +375,7 @@ install_xmrsh() {
     
     # Download from ssa.sx or copy current script
     if [ "$SCRIPT_PATH" != "$INSTALL_DIR/xmrsh" ]; then
-        SCRIPT_URL="https://ssa.sx/xmrsh"
+        SCRIPT_URL="https://raw.githubusercontent.com/sarkrui/xmrsh/refs/heads/main/xmrsh"
         info "Downloading xmrsh from $SCRIPT_URL..."
         sudo curl -s "$SCRIPT_URL" -o "$INSTALL_DIR/xmrsh"
         if [ $? -ne 0 ]; then
