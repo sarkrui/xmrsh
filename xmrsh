@@ -1,0 +1,633 @@
+#!/bin/bash
+
+# xmrsh - XMRig Helper Script for macOS and Linux
+# This script helps manage XMRig mining software on macOS and Linux
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# System detection variables
+OS=""
+ARCH=""
+IS_MAC=0
+IS_LINUX=0
+IS_ARM=0
+IS_X86=0
+
+# Detect system architecture and OS
+detect_system() {
+    # Detect OS
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        OS="macos"
+        IS_MAC=1
+    elif [[ "$OSTYPE" == "linux"* ]]; then
+        OS="linux"
+        IS_LINUX=1
+    else
+        error "Unsupported operating system: $OSTYPE"
+    fi
+    
+    # Detect architecture
+    local arch_raw=$(uname -m)
+    if [[ "$arch_raw" == "x86_64" || "$arch_raw" == "amd64" ]]; then
+        ARCH="x86_64"
+        IS_X86=1
+    elif [[ "$arch_raw" == "arm64" || "$arch_raw" == "aarch64" ]]; then
+        ARCH="arm64"
+        IS_ARM=1
+    else
+        error "Unsupported architecture: $arch_raw"
+    fi
+    
+    info "Detected system: $OS on $ARCH architecture"
+}
+
+# Print colored message
+print_msg() {
+    echo -e "${2}${1}${NC}"
+}
+
+# Print error message and exit
+error() {
+    print_msg "ERROR: $1" "$RED"
+    exit 1
+}
+
+# Print success message
+success() {
+    print_msg "SUCCESS: $1" "$GREEN"
+}
+
+# Print info message
+info() {
+    print_msg "INFO: $1" "$CYAN"
+}
+
+# Print warning message
+warning() {
+    print_msg "WARNING: $1" "$YELLOW"
+}
+
+# Check if package manager is available and install dependencies
+check_dependencies() {
+    if [ $IS_MAC -eq 1 ]; then
+        check_brew
+    elif [ $IS_LINUX -eq 1 ]; then
+        check_apt
+    fi
+}
+
+# Check if Homebrew is installed, install if not (macOS)
+check_brew() {
+    info "Checking if Homebrew is installed..."
+    if ! command -v brew &> /dev/null; then
+        warning "Homebrew not found. Installing..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        if [ $? -ne 0 ]; then
+            error "Failed to install Homebrew."
+        fi
+        success "Homebrew installed successfully."
+    else
+        success "Homebrew is already installed."
+    fi
+}
+
+# Check for apt and install dependencies (Linux)
+check_apt() {
+    info "Checking for required Linux dependencies..."
+    if ! command -v apt &> /dev/null; then
+        warning "This script requires apt package manager."
+        info "Attempting to continue anyway..."
+    else
+        info "Installing required dependencies..."
+        sudo apt update
+        sudo apt install -y curl wget tar screen
+        if [ $? -ne 0 ]; then
+            warning "Failed to install some dependencies. Continuing anyway..."
+        else
+            success "Dependencies installed successfully."
+        fi
+    fi
+}
+
+# Install XMRig 
+install_xmrig() {
+    info "Checking if XMRig is installed..."
+    if ! command -v xmrig &> /dev/null; then
+        warning "XMRig not found. Installing..."
+        
+        if [ $IS_MAC -eq 1 ]; then
+            # macOS installation via Homebrew
+            brew install xmrig
+            if [ $? -ne 0 ]; then
+                error "Failed to install XMRig."
+            fi
+        elif [ $IS_LINUX -eq 1 ]; then
+            # Linux installation by downloading binary
+            if [ $IS_X86 -eq 1 ]; then
+                info "Downloading XMRig for Linux x86_64..."
+                wget -O /tmp/xmrig.tar.gz https://github.com/xmrig/xmrig/releases/download/v6.22.2/xmrig-6.22.2-linux-static-x64.tar.gz
+                
+                if [ $? -ne 0 ]; then
+                    error "Failed to download XMRig."
+                fi
+                
+                # Extract and install
+                mkdir -p /tmp/xmrig
+                tar -xzf /tmp/xmrig.tar.gz -C /tmp/xmrig --strip-components=1
+                
+                # Install to /usr/local/bin
+                sudo cp /tmp/xmrig/xmrig /usr/local/bin/
+                sudo chmod +x /usr/local/bin/xmrig
+                
+                # Clean up
+                rm -rf /tmp/xmrig /tmp/xmrig.tar.gz
+            else
+                error "Automatic installation for Linux ARM is not yet supported. Please compile XMRig manually."
+            fi
+        fi
+        
+        success "XMRig installed successfully."
+    else
+        success "XMRig is already installed."
+    fi
+    
+    # Make sure XMRig is executable in the current directory if it exists
+    if [ -f "./xmrig" ]; then
+        info "Making local XMRig executable..."
+        chmod +x ./xmrig
+        success "Local XMRig is now executable."
+    fi
+}
+
+# Download and update config.json
+update_config() {
+    info "Downloading latest config.json..."
+    CONFIG_URL="https://gist.aooo.nl/u/053d355b994f4de4a4fea28c932e3792/raw/HEAD/config.json"
+    
+    # Default config path
+    CONFIG_PATH="$HOME/.config.json"
+    
+    if [ $IS_MAC -eq 1 ]; then
+        # Additional macOS config paths
+        BREW_CONFIG="/opt/homebrew/Cellar/xmrig/6.22.2/bin/config.json"
+        HOME_CONFIG="$HOME/.xmrig.json"
+        CONFIG_CONFIG="$HOME/.config/xmrig.json"
+        
+        # Download to all macOS locations
+        for MAC_CONFIG_PATH in "$BREW_CONFIG" "$HOME_CONFIG" "$CONFIG_CONFIG"; do
+            # Create directory if needed
+            CONFIG_DIR=$(dirname "$MAC_CONFIG_PATH")
+            if [ ! -d "$CONFIG_DIR" ]; then
+                mkdir -p "$CONFIG_DIR"
+            fi
+            
+            # Download config
+            curl -s "$CONFIG_URL" -o "$MAC_CONFIG_PATH"
+            if [ $? -ne 0 ]; then
+                warning "Failed to download config file to $MAC_CONFIG_PATH"
+            else
+                success "Config file saved to $MAC_CONFIG_PATH"
+            fi
+        done
+    fi
+    
+    # Download to common location for all systems
+    curl -s "$CONFIG_URL" -o "$CONFIG_PATH"
+    if [ $? -ne 0 ]; then
+        warning "Failed to download config file to $CONFIG_PATH"
+    else
+        success "Config file saved to $CONFIG_PATH"
+    fi
+}
+
+# Check for screen or set up service
+setup_background_service() {
+    info "Checking for screen utility..."
+    if ! command -v screen &> /dev/null; then
+        warning "Screen not found."
+        
+        if [ $IS_MAC -eq 1 ]; then
+            # macOS: Set up launchctl service
+            warning "Setting up launchctl service..."
+            
+            # Create plist file for launchctl
+            PLIST_PATH="$HOME/Library/LaunchAgents/com.xmrig.miner.plist"
+            
+            cat > "$PLIST_PATH" << EOL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.xmrig.miner</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$(which xmrig)</string>
+        <string>-c</string>
+        <string>${HOME}/.config.json</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${HOME}/.xmrig.log</string>
+    <key>StandardErrorPath</key>
+    <string>${HOME}/.xmrig.log</string>
+</dict>
+</plist>
+EOL
+            
+            # Load the service
+            launchctl load "$PLIST_PATH"
+            if [ $? -ne 0 ]; then
+                error "Failed to load launchctl service."
+            fi
+            
+            success "Launchctl service set up successfully."
+            info "XMRig will run in the background and restart automatically."
+            info "Check logs at $HOME/.xmrig.log"
+            return 0
+        elif [ $IS_LINUX -eq 1 ]; then
+            # Linux: Set up systemd service if available
+            if command -v systemctl &> /dev/null; then
+                warning "Setting up systemd service..."
+                
+                # Create systemd service file
+                SERVICE_PATH="/tmp/xmrig.service"
+                
+                cat > "$SERVICE_PATH" << EOL
+[Unit]
+Description=XMRig Monero Miner
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$(which xmrig) -c ${HOME}/.config.json
+Restart=always
+RestartSec=15
+User=$USER
+
+[Install]
+WantedBy=multi-user.target
+EOL
+                
+                # Install service
+                sudo mv "$SERVICE_PATH" /etc/systemd/system/xmrig.service
+                sudo systemctl daemon-reload
+                sudo systemctl enable xmrig.service
+                sudo systemctl start xmrig.service
+                
+                if [ $? -ne 0 ]; then
+                    error "Failed to set up systemd service."
+                fi
+                
+                success "Systemd service set up successfully."
+                info "XMRig will run in the background and restart automatically."
+                info "Check status with: systemctl status xmrig"
+                return 0
+            else
+                warning "Neither screen nor systemd found. Installing screen..."
+                if [ $IS_LINUX -eq 1 ]; then
+                    sudo apt install -y screen
+                    if [ $? -ne 0 ]; then
+                        error "Failed to install screen."
+                    fi
+                    success "Screen installed."
+                    return 1
+                else
+                    error "Cannot set up background service. Please install screen manually."
+                fi
+            fi
+        fi
+    else
+        success "Screen utility found."
+        return 1
+    fi
+}
+
+# Run XMRig with auto-restart
+run_xmrig() {
+    local use_screen=$1
+    
+    if [ "$use_screen" -eq 1 ]; then
+        info "Starting XMRig in screen session..."
+        
+        # Create a script that will auto-restart XMRig
+        RESTART_SCRIPT="$HOME/.xmrig_restart.sh"
+        
+        cat > "$RESTART_SCRIPT" << EOL
+#!/bin/bash
+while true; do
+    $(which xmrig) -c $HOME/.config.json
+    sleep 5
+done
+EOL
+        
+        chmod +x "$RESTART_SCRIPT"
+        
+        # Check if there's already a screen session
+        if screen -list | grep -q "xmrig"; then
+            warning "XMRig screen session already exists."
+            info "To attach to it, run: screen -r xmrig"
+        else
+            screen -dmS xmrig "$RESTART_SCRIPT"
+            success "XMRig started in screen session named 'xmrig'."
+            info "To view the mining console, run: screen -r xmrig"
+            info "To detach from the console, press CTRL+A followed by D."
+        fi
+    else
+        if [ $IS_MAC -eq 1 ]; then
+            info "XMRig is managed by launchctl."
+            info "To check status: launchctl list | grep xmrig"
+            info "To stop: launchctl unload ~/Library/LaunchAgents/com.xmrig.miner.plist"
+            info "To start: launchctl load ~/Library/LaunchAgents/com.xmrig.miner.plist"
+        elif [ $IS_LINUX -eq 1 ]; then
+            info "XMRig is managed by systemd."
+            info "To check status: systemctl status xmrig"
+            info "To stop: sudo systemctl stop xmrig"
+            info "To start: sudo systemctl start xmrig"
+        fi
+    fi
+}
+
+# Install xmrsh to system path
+install_xmrsh() {
+    info "Installing xmrsh to system path..."
+    
+    INSTALL_DIR="/usr/local/bin"
+    if [ ! -d "$INSTALL_DIR" ]; then
+        warning "$INSTALL_DIR directory not found. Creating..."
+        sudo mkdir -p "$INSTALL_DIR"
+    fi
+    
+    # Get current script path
+    SCRIPT_PATH=$(realpath "$0")
+    
+    # Download from ssa.sx or copy current script
+    if [ "$SCRIPT_PATH" != "$INSTALL_DIR/xmrsh" ]; then
+        SCRIPT_URL="https://ssa.sx/xmrsh"
+        info "Downloading xmrsh from $SCRIPT_URL..."
+        sudo curl -s "$SCRIPT_URL" -o "$INSTALL_DIR/xmrsh"
+        if [ $? -ne 0 ]; then
+            warning "Failed to download xmrsh script. Copying current script instead..."
+            sudo cp "$SCRIPT_PATH" "$INSTALL_DIR/xmrsh"
+        fi
+    else
+        info "Script is already in $INSTALL_DIR. Refreshing..."
+        sudo cp "$SCRIPT_PATH" "$INSTALL_DIR/xmrsh.new"
+        sudo mv "$INSTALL_DIR/xmrsh.new" "$INSTALL_DIR/xmrsh"
+    fi
+    
+    sudo chmod +x "$INSTALL_DIR/xmrsh"
+    if [ $? -ne 0 ]; then
+        error "Failed to make script executable"
+    fi
+    
+    success "xmrsh installed to $INSTALL_DIR/xmrsh"
+    info "You can now run 'xmrsh' from anywhere."
+}
+
+# Uninstall xmrsh and all components
+uninstall_xmrsh() {
+    info "Uninstalling xmrsh and all components..."
+    
+    # Stop XMRig if running
+    stop_xmrig
+    
+    # Remove config files
+    CONFIG_FILES=(
+        "$HOME/.config.json"
+    )
+    
+    if [ $IS_MAC -eq 1 ]; then
+        # Add macOS specific config files
+        CONFIG_FILES+=(
+            "/opt/homebrew/Cellar/xmrig/6.22.2/bin/config.json"
+            "$HOME/.xmrig.json"
+            "$HOME/.config/xmrig.json"
+        )
+    fi
+    
+    for CONFIG_FILE in "${CONFIG_FILES[@]}"; do
+        if [ -f "$CONFIG_FILE" ]; then
+            rm "$CONFIG_FILE"
+            success "Removed config file: $CONFIG_FILE"
+        fi
+    done
+    
+    # Remove script files
+    SCRIPT_FILES=(
+        "/usr/local/bin/xmrsh"
+        "$HOME/.xmrig_restart.sh"
+    )
+    
+    for SCRIPT_FILE in "${SCRIPT_FILES[@]}"; do
+        if [ -f "$SCRIPT_FILE" ]; then
+            if [[ "$SCRIPT_FILE" == "/usr/local/bin/xmrsh" ]]; then
+                sudo rm "$SCRIPT_FILE"
+            else
+                rm "$SCRIPT_FILE"
+            fi
+            success "Removed script file: $SCRIPT_FILE"
+        fi
+    done
+    
+    if [ $IS_MAC -eq 1 ]; then
+        # Remove macOS launchctl plist
+        PLIST_FILE="$HOME/Library/LaunchAgents/com.xmrig.miner.plist"
+        if [ -f "$PLIST_FILE" ]; then
+            launchctl unload "$PLIST_FILE" 2>/dev/null
+            rm "$PLIST_FILE"
+            success "Removed and unloaded launchctl service: $PLIST_FILE"
+        fi
+    elif [ $IS_LINUX -eq 1 ]; then
+        # Remove Linux systemd service
+        if command -v systemctl &> /dev/null && [ -f "/etc/systemd/system/xmrig.service" ]; then
+            sudo systemctl stop xmrig 2>/dev/null
+            sudo systemctl disable xmrig 2>/dev/null
+            sudo rm /etc/systemd/system/xmrig.service
+            sudo systemctl daemon-reload
+            success "Removed systemd service: xmrig.service"
+        fi
+    fi
+    
+    # Remove log file
+    LOG_FILE="$HOME/.xmrig.log"
+    if [ -f "$LOG_FILE" ]; then
+        rm "$LOG_FILE"
+        success "Removed log file: $LOG_FILE"
+    fi
+    
+    success "Uninstallation complete. XMRig and xmrsh have been removed."
+    
+    if [ $IS_MAC -eq 1 ]; then
+        info "Note: XMRig itself is still installed via Homebrew. To remove it completely, run: brew uninstall xmrig"
+    elif [ $IS_LINUX -eq 1 ] && [ -f "/usr/local/bin/xmrig" ]; then
+        info "Note: XMRig binary is still installed at /usr/local/bin/xmrig. To remove it completely, run: sudo rm /usr/local/bin/xmrig"
+    fi
+}
+
+# Show help
+show_help() {
+    echo -e "${PURPLE}======== XMRig Helper (xmrsh) ========${NC}"
+    echo -e "${BLUE}Usage:${NC}"
+    echo -e "  xmrsh [command]"
+    echo ""
+    echo -e "${BLUE}Commands:${NC}"
+    echo -e "  ${GREEN}install, i${NC}      Install XMRig and dependencies"
+    echo -e "  ${GREEN}config, c${NC}        Update config from remote source"
+    echo -e "  ${GREEN}start, st${NC}        Start XMRig in the background"
+    echo -e "  ${GREEN}status, stat${NC}     Check XMRig status"
+    echo -e "  ${GREEN}stop, sp${NC}         Stop XMRig"
+    echo -e "  ${GREEN}setup, s${NC}         Install xmrsh to system path"
+    echo -e "  ${GREEN}uninstall, u${NC}     Remove all xmrsh components"
+    echo -e "  ${GREEN}system, sys${NC}      Show system information"
+    echo -e "  ${GREEN}help, h${NC}          Show this help message"
+    echo ""
+    echo -e "${BLUE}Examples:${NC}"
+    echo -e "  ${CYAN}xmrsh i${NC}          Install XMRig and its dependencies"
+    echo -e "  ${CYAN}xmrsh st${NC}         Start mining with XMRig"
+    echo -e "  ${CYAN}xmrsh sp${NC}         Stop mining"
+    echo ""
+    echo -e "${YELLOW}For more information, visit: https://xmrig.com/docs${NC}"
+}
+
+# Show system information
+show_system_info() {
+    echo -e "${PURPLE}======== System Information ========${NC}"
+    echo -e "${BLUE}Operating System:${NC} $OS"
+    echo -e "${BLUE}Architecture:${NC} $ARCH"
+    
+    if [ $IS_MAC -eq 1 ]; then
+        echo -e "${BLUE}System Type:${NC} macOS"
+        if [ $IS_ARM -eq 1 ]; then
+            echo -e "${BLUE}CPU Type:${NC} Apple Silicon (ARM)"
+        else
+            echo -e "${BLUE}CPU Type:${NC} Intel x86"
+        fi
+    elif [ $IS_LINUX -eq 1 ]; then
+        echo -e "${BLUE}System Type:${NC} Linux"
+        if [ $IS_ARM -eq 1 ]; then
+            echo -e "${BLUE}CPU Type:${NC} ARM"
+        else
+            echo -e "${BLUE}CPU Type:${NC} x86_64"
+        fi
+        
+        # Get Linux distribution details if available
+        if [ -f /etc/os-release ]; then
+            source /etc/os-release
+            echo -e "${BLUE}Distribution:${NC} $NAME $VERSION_ID"
+        fi
+    fi
+    
+    # Check XMRig installation
+    if command -v xmrig &> /dev/null; then
+        echo -e "${BLUE}XMRig:${NC} Installed ($(xmrig --version | head -n 1))"
+        echo -e "${BLUE}XMRig Path:${NC} $(which xmrig)"
+    else
+        echo -e "${BLUE}XMRig:${NC} Not installed"
+    fi
+    
+    # Check config file
+    if [ -f "$HOME/.config.json" ]; then
+        echo -e "${BLUE}Config:${NC} Found at $HOME/.config.json"
+    else
+        echo -e "${BLUE}Config:${NC} Not found"
+    fi
+}
+
+# Check XMRig status
+check_status() {
+    if screen -list | grep -q "xmrig"; then
+        success "XMRig is running in a screen session."
+        info "To view the mining console, run: screen -r xmrig"
+    elif [ $IS_MAC -eq 1 ] && launchctl list | grep -q "com.xmrig.miner"; then
+        success "XMRig is running via launchctl."
+        info "Check logs at $HOME/.xmrig.log"
+    elif [ $IS_LINUX -eq 1 ] && command -v systemctl &> /dev/null && systemctl is-active --quiet xmrig; then
+        success "XMRig is running via systemd."
+        info "Check status with: systemctl status xmrig"
+    else
+        warning "XMRig does not appear to be running."
+    fi
+}
+
+# Stop XMRig
+stop_xmrig() {
+    if screen -list | grep -q "xmrig"; then
+        info "Stopping XMRig screen session..."
+        screen -X -S xmrig quit
+        success "XMRig screen session stopped."
+    elif [ $IS_MAC -eq 1 ] && [ -f "$HOME/Library/LaunchAgents/com.xmrig.miner.plist" ]; then
+        info "Unloading XMRig launchctl service..."
+        launchctl unload "$HOME/Library/LaunchAgents/com.xmrig.miner.plist"
+        success "XMRig launchctl service unloaded."
+    elif [ $IS_LINUX -eq 1 ] && command -v systemctl &> /dev/null && [ -f "/etc/systemd/system/xmrig.service" ]; then
+        info "Stopping XMRig systemd service..."
+        sudo systemctl stop xmrig
+        success "XMRig systemd service stopped."
+    else
+        warning "No running XMRig instance found."
+    fi
+}
+
+# Main function
+main() {
+    # Detect system architecture first
+    detect_system
+    
+    case "$1" in
+        install|i)
+            check_dependencies
+            install_xmrig
+            update_config
+            success "XMRig setup complete. Use 'xmrsh start' to begin mining."
+            ;;
+        config|c)
+            update_config
+            ;;
+        start|st)
+            if [ ! -f "$HOME/.config.json" ]; then
+                warning "Config file not found. Downloading..."
+                update_config
+            fi
+            
+            # Set up background service or use screen
+            setup_background_service
+            use_screen=$?
+            run_xmrig $use_screen
+            ;;
+        status|stat)
+            check_status
+            ;;
+        stop|sp)
+            stop_xmrig
+            ;;
+        setup|s)
+            install_xmrsh
+            ;;
+        uninstall|u)
+            uninstall_xmrsh
+            ;;
+        system|sys)
+            show_system_info
+            ;;
+        help|h|"")
+            show_help
+            ;;
+        *)
+            error "Unknown command: $1. Use 'xmrsh help' for usage information."
+            ;;
+    esac
+}
+
+# Run main function with arguments
+main "$@" 
