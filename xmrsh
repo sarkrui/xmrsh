@@ -170,8 +170,21 @@ install_xmrig() {
 
 # Download and update config.json
 update_config() {
-    info "Downloading latest config.json..."
-    CONFIG_URL="https://raw.githubusercontent.com/sarkrui/xmrsh/refs/heads/main/config.json"
+    # Default config URL
+    CONFIG_URL="https://raw.githubusercontent.com/sarkrui/xmrsh/refs/heads/main/sample.json"
+    
+    # Check if a custom URL was provided
+    if [[ "$1" == "--remote="* ]]; then
+        CUSTOM_URL="${1#--remote=}"
+        if [[ -n "$CUSTOM_URL" ]]; then
+            info "Using custom config URL: $CUSTOM_URL"
+            CONFIG_URL="$CUSTOM_URL"
+        else
+            warning "Empty URL provided with --remote flag. Using default URL."
+        fi
+    fi
+    
+    info "Downloading config from $CONFIG_URL..."
     
     # Default config path
     CONFIG_PATH="$HOME/.config.json"
@@ -486,6 +499,7 @@ show_help() {
     echo -e "${BLUE}Commands:${NC}"
     echo -e "  ${GREEN}install, i${NC}      Install XMRig and dependencies"
     echo -e "  ${GREEN}config, c${NC}        Update config from remote source"
+    echo -e "            --remote=\"URL\"    Import config from a custom URL"
     echo -e "  ${GREEN}start, st${NC}        Start XMRig in the background"
     echo -e "  ${GREEN}status, stat${NC}     Check XMRig status"
     echo -e "  ${GREEN}stop, sp${NC}         Stop XMRig"
@@ -500,6 +514,7 @@ show_help() {
     echo -e "  ${CYAN}xmrsh st${NC}         Start mining with XMRig"
     echo -e "  ${CYAN}xmrsh sp${NC}         Stop mining"
     echo -e "  ${CYAN}xmrsh co 50${NC}      Set XMRig to use 50% of CPU cores"
+    echo -e "  ${CYAN}xmrsh c --remote=\"https://example.com/myconfig.json\"${NC}  Import custom config"
     echo ""
     echo -e "${YELLOW}For more information, visit: https://xmrig.com/docs${NC}"
 }
@@ -753,7 +768,7 @@ main() {
             success "XMRig setup complete. Use 'xmrsh start' to begin mining."
             ;;
         config|c)
-            update_config
+            update_config "$2"
             ;;
         start|st)
             if [ ! -f "$HOME/.config.json" ]; then
