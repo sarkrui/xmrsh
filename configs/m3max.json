@@ -10,7 +10,7 @@
         "access-token": "pass",
         "restricted": true
     },
-    "autosave": true,
+    "autosave": false,
     "background": false,
     "colors": true,
     "title": true,
@@ -32,7 +32,7 @@
         "hw-aes": null,
         "priority": 5,
         "memory-pool": false,
-        "yield": true,
+        "yield": false,
         "argon2-impl": null,
         "argon2": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         "cn": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
