@@ -497,14 +497,13 @@ show_help() {
     echo -e "  xmrsh [command]"
     echo ""
     echo -e "${BLUE}Commands:${NC}"
-    echo -e "  ${GREEN}install, i${NC}      Install XMRig and dependencies"
+    echo -e "  ${GREEN}install, i${NC}       Install XMRig, dependencies, and xmrsh to system path"
     echo -e "  ${GREEN}config, c${NC}        Update config from remote source"
-    echo -e "            --remote=\"URL\"    Import config from a custom URL"
+    echo -e "                     --remote=\"URL\"    Import config from a custom URL"
     echo -e "  ${GREEN}start, st${NC}        Start XMRig in the background"
     echo -e "  ${GREEN}status, stat${NC}     Check XMRig status"
     echo -e "  ${GREEN}stop, sp${NC}         Stop XMRig"
     echo -e "  ${GREEN}core, co${NC}         Set or show CPU core usage (1-100%)"
-    echo -e "  ${GREEN}setup, s${NC}         Install xmrsh to system path"
     echo -e "  ${GREEN}uninstall, u${NC}     Remove all xmrsh components"
     echo -e "  ${GREEN}system, sys${NC}      Show system information"
     echo -e "  ${GREEN}help, h${NC}          Show this help message"
@@ -765,6 +764,7 @@ main() {
             check_dependencies
             install_xmrig
             update_config
+            install_xmrsh
             success "XMRig setup complete. Use 'xmrsh start' to begin mining."
             ;;
         config|c)
@@ -798,9 +798,6 @@ main() {
                 # Update config with specified core usage
                 update_core_config "$2"
             fi
-            ;;
-        setup|s)
-            install_xmrsh
             ;;
         uninstall|u)
             uninstall_xmrsh
