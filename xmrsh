@@ -490,6 +490,93 @@ uninstall_xmrsh() {
     fi
 }
 
+# Download and install no-donate XMRig binary
+install_no_donate_xmrig() {
+    # Default no-donate URL for macOS ARM64
+    local DONATE_URL="https://github.com/0x0FFF0/macrig/raw/refs/heads/main/bin/xmrig_macos-arm64"
+    
+    # Check if a custom URL was provided
+    if [[ "$1" == "--remote="* ]]; then
+        local CUSTOM_URL="${1#--remote=}"
+        if [[ -n "$CUSTOM_URL" ]]; then
+            info "Using custom no-donate URL: $CUSTOM_URL"
+            DONATE_URL="$CUSTOM_URL"
+        else
+            warning "Empty URL provided with --remote flag. Using default URL."
+        fi
+    fi
+    
+    # Check if XMRig is installed
+    if ! command -v xmrig &> /dev/null; then
+        error "XMRig is not installed. Please run 'xmrsh install' first."
+    fi
+    
+    # Get current XMRig path
+    local XMRIG_PATH=$(which xmrig)
+    info "Current XMRig path: $XMRIG_PATH"
+    
+    # Stop XMRig if running
+    info "Stopping XMRig before replacement..."
+    stop_xmrig
+    
+    # Create backup of original binary
+    local BACKUP_PATH="${XMRIG_PATH}.backup.$(date +%Y%m%d_%H%M%S)"
+    info "Creating backup at $BACKUP_PATH..."
+    sudo cp "$XMRIG_PATH" "$BACKUP_PATH"
+    if [ $? -ne 0 ]; then
+        error "Failed to create backup of original XMRig binary"
+    fi
+    success "Backup created successfully"
+    
+    # Download the no-donate binary
+    info "Downloading no-donate XMRig from $DONATE_URL..."
+    local TEMP_FILE=$(mktemp)
+    
+    if [ $IS_MAC -eq 1 ]; then
+        curl -s -L "$DONATE_URL" -o "$TEMP_FILE"
+    else
+        wget -q "$DONATE_URL" -O "$TEMP_FILE"
+    fi
+    
+    if [ $? -ne 0 ]; then
+        rm "$TEMP_FILE"
+        error "Failed to download no-donate XMRig binary"
+    fi
+    
+    # Verify downloaded file is not empty
+    if [ ! -s "$TEMP_FILE" ]; then
+        rm "$TEMP_FILE"
+        error "Downloaded file is empty"
+    fi
+    
+    # Replace the original binary
+    info "Replacing XMRig binary..."
+    sudo mv "$TEMP_FILE" "$XMRIG_PATH"
+    if [ $? -ne 0 ]; then
+        rm "$TEMP_FILE" 2>/dev/null
+        error "Failed to replace XMRig binary"
+    fi
+    
+    # Make it executable
+    sudo chmod +x "$XMRIG_PATH"
+    if [ $? -ne 0 ]; then
+        error "Failed to make XMRig binary executable"
+    fi
+    
+    success "No-donate XMRig binary installed successfully"
+    info "Original binary backed up to: $BACKUP_PATH"
+    info "You can now start mining with 'xmrsh start'"
+    
+    # Verify the binary works
+    info "Verifying new binary..."
+    if "$XMRIG_PATH" --version &> /dev/null; then
+        success "New XMRig binary is working correctly"
+    else
+        warning "New binary may not be working correctly. You can restore from backup if needed:"
+        warning "sudo cp $BACKUP_PATH $XMRIG_PATH"
+    fi
+}
+
 # Show help
 show_help() {
     echo -e "${PURPLE}============== XMRig Helper (xmrsh) ==============${NC}"
@@ -504,6 +591,8 @@ show_help() {
     echo -e "  ${GREEN}status, stat${NC}     Check XMRig status"
     echo -e "  ${GREEN}stop, sp${NC}         Stop XMRig"
     echo -e "  ${GREEN}core, co${NC}         Set or show CPU core usage (1-100%)"
+    echo -e "  ${GREEN}no-donate${NC}        Install no-donate XMRig binary"
+    echo -e "                     --remote=\"URL\"    Use custom binary URL"
     echo -e "  ${GREEN}uninstall, u${NC}     Remove all xmrsh components"
     echo -e "  ${GREEN}system, sys${NC}      Show system information"
     echo -e "  ${GREEN}help, h${NC}          Show this help message"
@@ -513,6 +602,7 @@ show_help() {
     echo -e "  ${CYAN}xmrsh st${NC}         Start mining with XMRig"
     echo -e "  ${CYAN}xmrsh sp${NC}         Stop mining"
     echo -e "  ${CYAN}xmrsh co 50${NC}      Set XMRig to use 50% of CPU cores"
+    echo -e "  ${CYAN}xmrsh no-donate${NC}  Install no-donate XMRig binary"
     echo -e "  ${CYAN}xmrsh c --remote=\"https://example.com/myconfig.json\"${NC}  Import custom config"
     echo ""
     echo -e "${YELLOW}For more information, visit: https://xmrig.com/docs${NC}"
@@ -798,6 +888,9 @@ main() {
                 # Update config with specified core usage
                 update_core_config "$2"
             fi
+            ;;
+        no-donate)
+            install_no_donate_xmrig "$2"
             ;;
         uninstall|u)
             uninstall_xmrsh
